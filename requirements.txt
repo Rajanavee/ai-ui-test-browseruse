@@ -7,3 +7,12 @@ langchain
 openai  # optional if using OpenAI instead of Gemini
 python-dotenv
 pillow
+playwright
+robotframework
+robotframework-seleniumlibrary
+slack-sdk
+httpx
+langchain
+openai
+python-dotenv
+pillow

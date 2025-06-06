@@ -2,15 +2,15 @@ pipeline {
     agent any
 
     environment {
-        SLACK_BOT_TOKEN = credentials('slack-token') // From Jenkins Credentials > Secret Text
-        SLACK_CHANNEL = "ai-results"
-        PYTHONIOENCODING = "utf-8"
+        SLACK_BOT_TOKEN = credentials('slack-token')
+        SLACK_CHANNEL = '#ai-results'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/Rajanavee/ai-ui-test-browseruse.git'
+                git branch: 'main',
+                    url: 'https://github.com/Rajanavee/ai-ui-test-browseruse.git'
             }
         }
 
@@ -34,29 +34,15 @@ pipeline {
                 '''
             }
         }
-
-        stage('Send to Slack') {
-            when {
-                expression { fileExists('screenshots/combined.png') }
-            }
-            steps {
-                sh '''
-                    curl -F file=@screenshots/combined.png \
-                         -F "initial_comment=✅ AI UI Test Completed" \
-                         -F channels=$SLACK_CHANNEL \
-                         -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-                         https://slack.com/api/files.upload
-                '''
-            }
-        }
     }
 
     post {
-        success {
-            echo "Test completed ✅"
-        }
-        failure {
-            echo "Test failed ❌"
+        always {
+            echo "📣 Sending final Slack message..."
+            sh '''
+                source venv/bin/activate
+                python slack_simulator.py
+            '''
         }
     }
 }
