@@ -110,13 +110,13 @@ SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#ai-results")
 
 def merge_screenshots(input_folder, output_path):
     if not os.path.exists(input_folder):
-        print(f"⚠️ Folder not found: {input_folder}. Using fallback image.")
-        return None
+        print("⚠️ Folder not found: screenshots. Using fallback image.")
+        return "fallback.png"
 
     files = sorted([f for f in os.listdir(input_folder) if f.endswith(".png")])
     if not files:
         print("⚠️ No screenshots found. Using fallback image.")
-        return None
+        return "fallback.png"
 
     images = [Image.open(os.path.join(input_folder, f)) for f in files]
     widths, heights = zip(*(img.size for img in images))
@@ -134,21 +134,38 @@ def merge_screenshots(input_folder, output_path):
     return output_path
 
 def send_to_slack(text, image_path, report_url=None):
-    file_to_send = image_path if image_path and os.path.exists(image_path) else "fallback.png"
-    if not os.path.exists(file_to_send):
-        print("❌ fallback.png missing! Please add it to the project directory.")
-        return
-
-    with open(file_to_send, "rb") as f:
+    # Upload the image file to Slack to get a public URL
+    with open(image_path, "rb") as f:
         response = requests.post(
             "https://slack.com/api/files.upload",
             headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
             files={"file": f},
-            data={
-                "channels": SLACK_CHANNEL,
-                "initial_comment": text + (f"\n📎 [Jenkins Report]({report_url})" if report_url else "")
-            }
+            data={"channels": SLACK_CHANNEL}
         )
+
+    if response.status_code != 200 or not response.json().get("ok"):
+        print("❌ Failed to upload image:", response.text)
+        return
+
+    file_info = response.json()["file"]
+    image_url = file_info["url_private"]
+
+    # Send a message with image link
+    message = f"{text}\n🖼 Image: {image_url}"
+    if report_url:
+        message += f"\n📎 [Report]({report_url})"
+
+    response = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={
+            "Authorization": f"Bearer {SLACK_TOKEN}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "channel": SLACK_CHANNEL,
+            "text": message
+        }
+    )
 
     if response.status_code == 200 and response.json().get("ok"):
         print("✅ Report sent to Slack.")
@@ -156,16 +173,11 @@ def send_to_slack(text, image_path, report_url=None):
         print("❌ Failed to send Slack message:", response.text)
 
 if __name__ == "__main__":
-    try:
-        image = merge_screenshots("screenshots", "screenshots/combined.png")
-        status = "✅ PASS" if os.path.exists("screenshots/result.png") else "❌ FAIL"
-    except Exception as e:
-        print("⚠️ Exception during screenshot merge:", e)
-        image = None
-        status = "❌ FAIL (error)"
+    image = merge_screenshots("screenshots", "screenshots/combined.png")
 
+    status = "✅ PASS" if os.path.exists("screenshots/result.png") else "❌ FAIL"
     send_to_slack(
         text=f"{status} - AI UI Test Result",
         image_path=image,
-        report_url="https://your-jenkins-url/job/AI%20UI%20Test%20Bot/lastBuild/robot/report/report.html"
+        report_url="https://jenkins.example.com/job/AI_UI_Test_Bot/lastBuild"
     )
