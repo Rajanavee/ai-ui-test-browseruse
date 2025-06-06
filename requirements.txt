@@ -6,3 +6,4 @@ httpx
 langchain
 openai  # optional if using OpenAI instead of Gemini
 python-dotenv
+pillow
