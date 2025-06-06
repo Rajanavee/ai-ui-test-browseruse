@@ -1,36 +1,66 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-        VENV_DIR = "venv"
-        SLACK_CHANNEL = "ai-results"
+  environment {
+    SLACK_BOT_TOKEN = credentials('slack-token')   // From Jenkins Credentials
+    SLACK_CHANNEL = 'ai-results'
+  }
+
+  stages {
+    stage('Clone Repo') {
+      steps {
+        git branch: 'main', url: 'https://github.com/Rajanavee/ai-ui-test-browseruse.git'
+      }
     }
 
-    stages {
-        stage('Setup') {
-            steps {
-                sh 'python3 -m venv venv'
-                sh 'source venv/bin/activate && pip install -r requirements.txt && python -m playwright install'
-            }
-        }
-
-        stage('Run Test') {
-            steps {
-                sh 'source venv/bin/activate && python slack_simulator.py'
-                sh 'source venv/bin/activate && robot -d reports tests/test_browser_use.robot'
-            }
-        }
-
-        stage('Send to Slack') {
-            steps {
-                sh 'source venv/bin/activate && python slack_reporter.py'
-            }
-        }
+    stage('Setup Python & Install Deps') {
+      steps {
+        sh '''
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install Pillow
+          python -m playwright install
+        '''
+      }
     }
 
-    post {
-        failure {
-            echo 'Test failed ❌'
-        }
+    stage('Run Test') {
+      steps {
+        sh '''
+          source venv/bin/activate
+          python slack_simulator.py
+        '''
+      }
     }
+
+    stage('Send to Slack') {
+      when {
+        expression { currentBuild.currentResult == 'SUCCESS' }
+      }
+      steps {
+        sh '''
+          curl -F file=@screenshots/combined.png \
+               -F "initial_comment=✅ AI Test Summary: Job #${BUILD_NUMBER} - *PASSED*" \
+               -F channels=${SLACK_CHANNEL} \
+               -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+               https://slack.com/api/files.upload
+        '''
+      }
+    }
+  }
+
+  post {
+    failure {
+      echo 'Test failed ❌'
+      sh '''
+        curl -F file=@screenshots/combined.png \
+             -F "initial_comment=❌ AI Test Summary: Job #${BUILD_NUMBER} - *FAILED*" \
+             -F channels=${SLACK_CHANNEL} \
+             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+             https://slack.com/api/files.upload || true
+      '''
+    }
+  }
 }
