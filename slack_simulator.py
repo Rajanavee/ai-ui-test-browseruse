@@ -108,15 +108,17 @@ load_dotenv()
 SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#ai-results")
 
+FALLBACK_IMAGE = "fallback.png"
+
 def merge_screenshots(input_folder, output_path):
-    if not os.path.exists(input_folder):
+    if not os.path.exists(input_folder) or not os.listdir(input_folder):
         print("⚠️ Folder not found: screenshots. Using fallback image.")
-        return "fallback.png"
+        return FALLBACK_IMAGE
 
     files = sorted([f for f in os.listdir(input_folder) if f.endswith(".png")])
     if not files:
-        print("⚠️ No screenshots found. Using fallback image.")
-        return "fallback.png"
+        print("⚠️ No PNGs in screenshots. Using fallback image.")
+        return FALLBACK_IMAGE
 
     images = [Image.open(os.path.join(input_folder, f)) for f in files]
     widths, heights = zip(*(img.size for img in images))
@@ -134,50 +136,29 @@ def merge_screenshots(input_folder, output_path):
     return output_path
 
 def send_to_slack(text, image_path, report_url=None):
-    # Upload the image file to Slack to get a public URL
-    with open(image_path, "rb") as f:
-        response = requests.post(
-            "https://slack.com/api/files.upload",
-            headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
-            files={"file": f},
-            data={"channels": SLACK_CHANNEL}
-        )
-
-    if response.status_code != 200 or not response.json().get("ok"):
-        print("❌ Failed to upload image:", response.text)
-        return
-
-    file_info = response.json()["file"]
-    image_url = file_info["url_private"]
-
-    # Send a message with image link
-    message = f"{text}\n🖼 Image: {image_url}"
-    if report_url:
-        message += f"\n📎 [Report]({report_url})"
-
-    response = requests.post(
-        "https://slack.com/api/chat.postMessage",
-        headers={
-            "Authorization": f"Bearer {SLACK_TOKEN}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "channel": SLACK_CHANNEL,
-            "text": message
-        }
-    )
-
-    if response.status_code == 200 and response.json().get("ok"):
-        print("✅ Report sent to Slack.")
-    else:
-        print("❌ Failed to send Slack message:", response.text)
+    try:
+        with open(image_path, "rb") as f:
+            response = requests.post(
+                "https://slack.com/api/files.upload",
+                headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+                files={"file": f},
+                data={
+                    "channels": SLACK_CHANNEL,
+                    "initial_comment": f"{text}\n{report_url or ''}"
+                }
+            )
+        if response.status_code == 200 and response.json().get("ok"):
+            print("✅ Report sent to Slack.")
+        else:
+            print("❌ Failed to upload image:", response.text)
+    except Exception as e:
+        print(f"❌ Exception during Slack upload: {e}")
 
 if __name__ == "__main__":
     image = merge_screenshots("screenshots", "screenshots/combined.png")
-
-    status = "✅ PASS" if os.path.exists("screenshots/result.png") else "❌ FAIL"
+    status = "✅ PASS" if image != FALLBACK_IMAGE else "❌ FAIL"
     send_to_slack(
         text=f"{status} - AI UI Test Result",
         image_path=image,
-        report_url="https://jenkins.example.com/job/AI_UI_Test_Bot/lastBuild"
+        report_url="https://jenkins.yoursite.com/job/AI%20UI%20Test%20Bot/"
     )
